@@ -1,47 +1,71 @@
 import requests
 import csv
+from lxml.html import fromstring
+from bs4 import BeautifulSoup
 from pprint import pprint
+
+# TODO: add timeouts to limit how long this takes
+# TODO: add title field to errors to prevent double-scraping?
 
 ERRORS_LIST_FILENAME = 'www-law-columbia-edu_20170522T210719Z_CrawlErrors.csv'
 
 
 def process_errors(errors_filename, start=0, end=None):
+    errors_list = get_errors_list(errors_filename)
+    errors_list = ignore_downloads(errors_list, start, end)
     print "Setting hosts file to point to new server"
     set_redirect(False)
-    errors_list = compare_with_new(errors_filename, start, end)
+    errors_list = compare_with_new(errors_list, start, end)
     print "Setting hosts file to point to old server"
     set_redirect(True)
-    errors_list = catch_old_404s(errors_filename, start, end)
+    errors_list = catch_old_404s(errors_list, start, end)
+    # Cleanup
+    print "Resetting hosts file to point to new server"
+    set_redirect(False)
     return errors_list[start:end]
 
 
-def catch_old_404s(errors_filename, start=0, end=None):
-    errors_list = get_errors_list(errors_filename)
+def catch_old_404s(errors_list, start=0, end=None):
     if end is None:
         end = len(errors_list)
     for error in errors_list[start:end]:
-        if error['newServerCode'] != 200:
+        if error['searchStatus'] == 'check':
             resp = requests.get(error['url'])
             error['oldServerCode'] = resp.status_code
+            # DEBUG
+            print "Url: " + resp.url + '; Code: ' + str(resp.status_code)
             if resp.status_code == 404:
                 error['searchStatus'] = 'deadPage'
             else:
-                error['searchStatus'] = 'onOld'
+                soup = BeautifulSoup(resp.content, 'html.parser')
+                title = soup.find('title')
+                if title is not None and '404' in title:
+                    # DEBUG PRINT STATEMENT FOR 404 TITLES
+                    print 'FOUND TITLE 404 PAGE: ' + error['url']
+                    error['old404Redirect'] = True
+                    error['searchStatus'] = 'deadPage'
     return errors_list[start:end]
 
 
-def compare_with_new(errors_filename, start=0, end=None):
-    errors_list = get_errors_list(errors_filename)
+def compare_with_new(errors_list, start=0, end=None):
     if end is None:
         end = len(errors_list)
     for error in errors_list[start:end]:
-        resp = requests.get(error['url'])
-        error['newServerCode'] = resp.status_code
-        if resp.status_code == 200:
-            print 'FOUND REDIRECTED PAGE: ' + error['url']
-            error['searchStatus'] = 'alreadyRedirected'
-        else:
-            error['searchStatus'] = 'notOnNew'
+        if error['searchStatus'] == 'check':
+            resp = requests.get(error['url'])
+            error['newServerCode'] = resp.status_code
+            if resp.status_code == 200:
+                # DEBUG PRINT STATEMENT FOR REDIRECTED PAGES
+                print 'FOUND REDIRECTED PAGE: ' + error['url']
+                error['searchStatus'] = 'alreadyRedirected'
+    return errors_list[start:end]
+
+
+def ignore_downloads(errors_list, start=0, end=None):
+    for error in errors_list[start:end]:
+        has_null = error['url'].startswith('http://www.law.columbia.edu/null')
+        if has_null or 'filemgr' in error['url']:
+            error['searchStatus'] = 'ignoredDwnld'
     return errors_list[start:end]
 
 
@@ -62,8 +86,9 @@ def get_errors_list(errors_filename):
                                 'lastCrawled': row['Last crawled'],
                                 'origCode': row['Response Code'],
                                 'oldServerCode': None,
+                                'old404Redirect': False,
                                 'newServerCode': None,
-                                'searchStatus': 'unchecked',
+                                'searchStatus': 'check',
                                 'possibleUrls': []})
     return errors_list
 
