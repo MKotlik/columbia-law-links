@@ -1,6 +1,8 @@
 import requests
+from requests.exceptions import TooManyRedirects
 import csv
-from lxml.html import fromstring
+import time
+import sys
 from bs4 import BeautifulSoup
 from pprint import pprint
 
@@ -10,54 +12,103 @@ from pprint import pprint
 ERRORS_LIST_FILENAME = 'www-law-columbia-edu_20170522T210719Z_CrawlErrors.csv'
 
 
+def timed_process_errors(errors_filename, start=0, end=None):
+    time_start = time.time()
+    result = process_errors(errors_filename, start, end)
+    time_end = time.time()
+    print "DONE: Processing took " + str(round(time_end - time_start)) + "ms"
+    return result
+
+
 def process_errors(errors_filename, start=0, end=None):
     errors_list = get_errors_list(errors_filename)
     errors_list = ignore_downloads(errors_list, start, end)
     print "Setting hosts file to point to new server"
     set_redirect(False)
-    errors_list = compare_with_new(errors_list, start, end)
+    errors_list = check_new_redirects(errors_list, start, end)
     print "Setting hosts file to point to old server"
     set_redirect(True)
-    errors_list = catch_old_404s(errors_list, start, end)
+    errors_list = parse_old_pages(errors_list, start, end)
     # Cleanup
     print "Resetting hosts file to point to new server"
     set_redirect(False)
     return errors_list[start:end]
 
 
-def catch_old_404s(errors_list, start=0, end=None):
+def parse_old_pages(errors_list, start=0, end=None):
+    # NOTE: combined with title scraper, since Soup-ing twice is inefficient
     if end is None:
         end = len(errors_list)
     for error in errors_list[start:end]:
         if error['searchStatus'] == 'check':
-            resp = requests.get(error['url'])
-            error['oldServerCode'] = resp.status_code
-            # DEBUG
-            print "Url: " + resp.url + '; Code: ' + str(resp.status_code)
-            if resp.status_code == 404:
-                error['searchStatus'] = 'deadPage'
-            else:
-                soup = BeautifulSoup(resp.content, 'html.parser')
-                title = soup.find('title')
-                if title is not None and '404' in title:
-                    # DEBUG PRINT STATEMENT FOR 404 TITLES
-                    print 'FOUND TITLE 404 PAGE: ' + error['url']
-                    error['old404Redirect'] = True
+            try:
+                resp = requests.get(error['url'])
+                error['oldServerCode'] = resp.status_code
+                # DEBUG
+                # print "Url: " + resp.url + '; Code: ' + str(resp.status_code)
+                if resp.status_code == 404:
                     error['searchStatus'] = 'deadPage'
+                elif resp.status_code == 500:
+                    error['searchStatus'] = 'serverError'
+                else:
+                    soup = BeautifulSoup(resp.content, 'html.parser')
+                    title = soup.find('title')
+                    if title is not None:
+                        title = title.text.lower()
+                        if '404' in title:
+                            # DEBUG PRINT STATEMENT FOR 404 TITLES
+                            print 'FOUND TITLE 404 PAGE: ' + error['url']
+                            error['old404Redirect'] = True
+                            error['searchStatus'] = 'deadPage'
+                        elif 'login' in title or 'sign in' in title:
+                            # DEBUG PRINT STATEMENT FOR LOGIN TITLES
+                            print 'FOUND TITLE LOGIN PAGE: ' + error['url']
+                            error['searchStatus'] = 'needsLogin'
+                        else:
+                            heading = parse_title(title)
+                            if heading is not None:
+                                error['pageName'] = heading
+            except TooManyRedirects as e:
+                error['searchStatus'] = 'redirectsError'
+                print "TOO MANY REDIRECTS ERROR for " + error['url']
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except:
+                error['searchStatus'] = 'unknownOldRequestError'
+                print 'CAUGHT UNKNOWN ERROR WHILE QUERYING OLD SERVER'
+                for item in sys.exc_info():
+                    print item
+                print 'CONTINUING'
+        # Completion DEBUG
+        print 'Parsed old: ' + error['url'] + '; Status: ' + error['searchStatus']
     return errors_list[start:end]
 
 
-def compare_with_new(errors_list, start=0, end=None):
+def check_new_redirects(errors_list, start=0, end=None):
     if end is None:
         end = len(errors_list)
     for error in errors_list[start:end]:
         if error['searchStatus'] == 'check':
-            resp = requests.get(error['url'])
-            error['newServerCode'] = resp.status_code
-            if resp.status_code == 200:
-                # DEBUG PRINT STATEMENT FOR REDIRECTED PAGES
-                print 'FOUND REDIRECTED PAGE: ' + error['url']
-                error['searchStatus'] = 'alreadyRedirected'
+            try:
+                resp = requests.get(error['url'])
+                error['newServerCode'] = resp.status_code
+                if resp.status_code == 200:
+                    # DEBUG PRINT STATEMENT FOR REDIRECTED PAGES
+                    print 'FOUND REDIRECTED PAGE: ' + error['url']
+                    error['searchStatus'] = 'alreadyRedirected'
+            except TooManyRedirects as e:
+                print "TOO MANY REDIRECTS ERROR for " + error['url']
+                error['searchStatus'] = 'newServerRedirectsError'
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except:
+                error['searchStatus'] = 'unknownNewRequestError'
+                print 'CAUGHT UNKNOWN ERROR WHILE QUERYING NEW SERVER'
+                for item in sys.exc_info():
+                    print item
+                print 'CONTINUING'
+        # Completion DEBUG
+        print 'Parsed new: ' + error['url'] + '; Status: ' + error['searchStatus']
     return errors_list[start:end]
 
 
@@ -69,12 +120,23 @@ def ignore_downloads(errors_list, start=0, end=None):
     return errors_list[start:end]
 
 
-def scrape_headings(errors_filename, start=0, end=None):
-    pass
-
-
 def get_possible_matches(errors_filename, start=0, end=None):
     pass
+
+
+def parse_title(page_title):
+    if '|' in page_title:
+        title_parts = page_title.split('|')
+    elif ':' in page_title:
+        title_parts = page_title.split(':')
+    else:
+        title_parts = [page_title]
+    heading = None
+    for part in title_parts:
+        part = part.strip().lower()
+        if part != 'columbia law school' and part != 'event':
+            heading = part
+    return heading
 
 
 def get_errors_list(errors_filename):
@@ -89,6 +151,7 @@ def get_errors_list(errors_filename):
                                 'old404Redirect': False,
                                 'newServerCode': None,
                                 'searchStatus': 'check',
+                                'pageName': None,
                                 'possibleUrls': []})
     return errors_list
 
@@ -112,6 +175,18 @@ def set_redirect(bool):
             with open('/etc/hosts', 'w') as hosts_file:
                 for line in hosts_lines[:-1]:
                     hosts_file.write(line)
+
+
+def timer(method):
+    def wrapper(*args, **kw):
+        startTime = int(round(time.time() * 1000))
+        result = method(*args, **kw)
+        endTime = int(round(time.time() * 1000))
+
+        print(endTime - startTime, 'ms')
+        return result
+
+    return wrapper
 
 
 if __name__ == "__main__":
