@@ -13,32 +13,38 @@ ERRORS_LIST_FILENAME = 'www-law-columbia-edu_20170522T210719Z_CrawlErrors.csv'
 
 
 def timed_process_errors(errors_filename, start=0, end=None):
+    print "======== BEGIN PROCESSING LINK ERRORS ========"
     time_start = time.time()
+    print "TIME AT START: " + str(time_start)
     result = process_errors(errors_filename, start, end)
+    print "======== END PROCESSING LINK ERRORS ========"
     time_end = time.time()
-    print "DONE: Processing took " + str(round(time_end - time_start)) + "ms"
+    print "TIME AT END: " + str(time_end)
+    print "TIME TAKEN: " + str(round(time_end - time_start)) + "ms"
     return result
 
 
 def process_errors(errors_filename, start=0, end=None):
     errors_list = get_errors_list(errors_filename)
+    if end is None:
+        end = len(errors_list)
+    print "Length of errors_list: " + str(len(errors_list))
+    print "Starting index: " + str(start) + "; Ending index: " + str(end)
     errors_list = ignore_downloads(errors_list, start, end)
-    print "Setting hosts file to point to new server"
+    print "HOSTS: Setting hosts file to point to new server"
     set_redirect(False)
     errors_list = check_new_redirects(errors_list, start, end)
-    print "Setting hosts file to point to old server"
+    print "HOSTS: Setting hosts file to point to old server"
     set_redirect(True)
     errors_list = parse_old_pages(errors_list, start, end)
     # Cleanup
-    print "Resetting hosts file to point to new server"
+    print "HOSTS: Resetting hosts file to point to new server"
     set_redirect(False)
     return errors_list[start:end]
 
 
 def parse_old_pages(errors_list, start=0, end=None):
     # NOTE: combined with title scraper, since Soup-ing twice is inefficient
-    if end is None:
-        end = len(errors_list)
     for error in errors_list[start:end]:
         if error['searchStatus'] == 'check':
             try:
@@ -81,12 +87,10 @@ def parse_old_pages(errors_list, start=0, end=None):
                 print 'CONTINUING'
         # Completion DEBUG
         print 'Parsed old: ' + error['url'] + '; Status: ' + error['searchStatus']
-    return errors_list[start:end]
+    return errors_list
 
 
 def check_new_redirects(errors_list, start=0, end=None):
-    if end is None:
-        end = len(errors_list)
     for error in errors_list[start:end]:
         if error['searchStatus'] == 'check':
             try:
@@ -109,7 +113,7 @@ def check_new_redirects(errors_list, start=0, end=None):
                 print 'CONTINUING'
         # Completion DEBUG
         print 'Parsed new: ' + error['url'] + '; Status: ' + error['searchStatus']
-    return errors_list[start:end]
+    return errors_list
 
 
 def ignore_downloads(errors_list, start=0, end=None):
@@ -117,7 +121,7 @@ def ignore_downloads(errors_list, start=0, end=None):
         has_null = error['url'].startswith('http://www.law.columbia.edu/null')
         if has_null or 'filemgr' in error['url']:
             error['searchStatus'] = 'ignoredDwnld'
-    return errors_list[start:end]
+    return errors_list
 
 
 def get_possible_matches(errors_filename, start=0, end=None):
@@ -162,7 +166,7 @@ def set_redirect(bool):
         with open('/etc/hosts', 'r') as hosts_file:
             hosts_lines = hosts_file.readlines()
         if hosts_lines[-1] == hosts_rule:
-            print "Hosts file already set for old server"
+            print "HOSTS: Hosts file already set for old server"
         else:
             with open('/etc/hosts', 'a') as hosts_file:
                 hosts_file.write(hosts_rule)
@@ -170,7 +174,7 @@ def set_redirect(bool):
         with open('/etc/hosts', 'r') as hosts_file:
             hosts_lines = hosts_file.readlines()
         if hosts_lines[-1] != hosts_rule:
-            print "Hosts file already set for new server"
+            print "HOSTS: Hosts file already set for new server"
         else:
             with open('/etc/hosts', 'w') as hosts_file:
                 for line in hosts_lines[:-1]:
