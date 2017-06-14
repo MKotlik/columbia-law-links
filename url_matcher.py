@@ -28,8 +28,8 @@ def process_errors(errors_filename, start=0, end=None):
     errors_list = get_errors_list(errors_filename)
     if end is None:
         end = len(errors_list)
-    print "Length of errors_list: " + str(len(errors_list))
-    print "Starting index: " + str(start) + "; Ending index: " + str(end)
+    print "LENGTH OF errors_list: " + str(len(errors_list))
+    print "STARTING INDEX: " + str(start) + "; ENDING INDEX: " + str(end)
     errors_list = ignore_downloads(errors_list, start, end)
     print "HOSTS: Setting hosts file to point to new server"
     set_redirect(False)
@@ -71,9 +71,17 @@ def parse_old_pages(errors_list, start=0, end=None):
                             print 'FOUND TITLE LOGIN PAGE: ' + error['url']
                             error['searchStatus'] = 'needsLogin'
                         else:
-                            heading = parse_title(title)
+                            heading, full_heading = parse_title(title)
                             if heading is not None:
+                                if ' ' not in heading:
+                                    # If name is one word, mark and hand check
+                                    error['searchStatus'] = 'shortName'
+                                else:
+                                    # Mark that probable name was found
+                                    error['searchStatus'] = 'foundName'
+                                # Always set name to whatever was found
                                 error['pageName'] = heading
+                                error['fullName'] = full_heading
             except TooManyRedirects as e:
                 error['searchStatus'] = 'redirectsError'
                 print "TOO MANY REDIRECTS ERROR for " + error['url']
@@ -129,6 +137,7 @@ def get_possible_matches(errors_filename, start=0, end=None):
 
 
 def parse_title(page_title):
+    # Return tuple of first element of title and string of all title parts
     if '|' in page_title:
         title_parts = page_title.split('|')
     elif ':' in page_title:
@@ -136,11 +145,15 @@ def parse_title(page_title):
     else:
         title_parts = [page_title]
     heading = None
+    full_heading = []
     for part in title_parts:
         part = part.strip().lower()
         if part != 'columbia law school' and part != 'event':
-            heading = part
-    return heading
+            full_heading.append(part)
+            # First element of title is most likely name, so use only that
+            if heading is not None:
+                heading = part
+    return (heading, ' '.join(full_heading))
 
 
 def get_errors_list(errors_filename):
@@ -156,6 +169,7 @@ def get_errors_list(errors_filename):
                                 'newServerCode': None,
                                 'searchStatus': 'check',
                                 'pageName': None,
+                                'fullName': None,
                                 'possibleUrls': []})
     return errors_list
 
