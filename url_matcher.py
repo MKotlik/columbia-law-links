@@ -3,6 +3,7 @@ from requests.exceptions import TooManyRedirects
 import csv
 import time
 import sys
+import json
 from bs4 import BeautifulSoup
 from pprint import pprint
 
@@ -41,6 +42,44 @@ def process_errors(errors_filename, start=0, end=None):
     print "HOSTS: Resetting hosts file to point to new server"
     set_redirect(False)
     return errors_list[start:end]
+
+
+def analyze_results(results):
+    ignored = [er for er in results if er['searchStatus'] == 'ignoredDwnld']
+    done = [er for er in results if er['searchStatus'] == 'alreadyRedirected']
+    dead_pages = [er for er in results if er['searchStatus'] == 'deadPage']
+    server_500 = [er for er in results if er['searchStatus'] == 'serverError']
+    redirects = [er for er in results if er['searchStatus'] == 'redirectsError']
+    new_redirects = [er for er in results if er['searchStatus'] == 'newServerRedirectsError']
+    new_unknown = [er for er in results if er['searchStatus'] == 'unknownNewRequestError']
+    need_login = [er for er in results if er['searchStatus'] == 'needsLogin']
+    short_name = [er for er in results if er['searchStatus'] == 'shortName']
+    found_name = [er for er in results if er['searchStatus'] == 'foundName']
+    matched = [er for er in results if er['searchStatus'] == 'matched']
+    report = []
+    report.append('===== ANALYSIS OF PROCESSED ERRORS =====')
+    report.append("Length of Errors List: " + str(len(results)))
+    report.append('Number of ignored downloads: ' + str(len(ignored)))
+    report.append('Number of already redirected pages: ' + str(len(done)))
+    report.append('Number of pages dead on old server: ' + str(len(dead_pages)))
+    report.append('Number of pages giving error 500 on old server: ' + str(len(server_500)))
+    report.append('Number of pages giving redirection errors on old server: ' + str(len(redirects)))
+    report.append('Number of pages giving redirection errors on new server: ' + str(len(new_redirects)))
+    report.append('Number of pages giving unknown errors on new server: ' + str(len(new_unknown)))
+    report.append('Number of pages needing login on old server: ' + str(len(need_login)))
+    report.append('Number of pages with one-word titles: ' + str(len(short_name)))
+    report.append('Number of pages with matcheable names: ' + str(len(found_name)))
+    report.append('Number of pages that have been matched: ' + str(len(matched)))
+    report.append('===== END ANALYSIS OF PROCESSED ERRORS =====')
+    report_str = "\n".join(report)
+    analysis = {'results': results, 'ignored': ignored, 'done': done,
+                'dead_pages': dead_pages, 'server_errors': server_500,
+                'old_redirects': redirects, 'new_redirects': new_redirects,
+                'new_unknown_errors': new_unknown, 'need_login': need_login,
+                'short_names': short_name, 'found_name': found_name,
+                'matched': matched, 'report': report_str}
+    print report_str
+    return analysis
 
 
 def parse_old_pages(errors_list, start=0, end=None):
@@ -193,6 +232,12 @@ def set_redirect(bool):
             with open('/etc/hosts', 'w') as hosts_file:
                 for line in hosts_lines[:-1]:
                     hosts_file.write(line)
+
+
+def save_results(errors_list, start, end):
+    filename = 'proccesed_errors_' + str(start) + '-' + str(end) + '.json'
+    with open(filename, 'w') as errors_file:
+        json.dump(errors_list, errors_file)
 
 
 def timer(method):
