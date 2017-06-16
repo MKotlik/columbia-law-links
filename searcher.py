@@ -21,14 +21,14 @@ def load_config(filename='config.cfg'):
 
 def get_base_url(api_key, engineID):
     if api_key is None:
-        print "SEARCHER: please load Google API Key from config file"
+        print "SEARCHER ERROR: please load Google API Key from config file"
         return None
     return ENDPOINT + "key=" + api_key + "&cx=" + engineID
 
 
 def search(base_url, query):
     if base_url is None:
-        print "SEARCHER: please load Google API Key from config file"
+        print "SEARCHER ERROR: please load Google API Key from config file"
         return None
     resp = requests.get(base_url, {"q": query})
     if resp.status_code != 200:
@@ -39,5 +39,5 @@ def search(base_url, query):
         return []
     results = []
     for item in resp_dict['items']:
-        results.append([item['title'], item['link']])
+        results.append({'title': item['title'], 'link': item['link']})
     return results
